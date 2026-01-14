@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: ticket-service-ticket241
+server:
+  port: 9002
+eureka:
+  client:
+    service-url:
+      defaultZone:
+        http://localhost:8781/eureka/

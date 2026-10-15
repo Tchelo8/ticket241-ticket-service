@@ -4,7 +4,8 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/ticket_service_db
     username: postgres
-    password: azerty
+    # Secrets : variables d'environnement ou fichier local config/application.yaml (voir config/secrets.example.yaml)
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -16,14 +17,7 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
   kafka:
     bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      properties:
-        spring.json.add.type.headers: false
-      acks: all
-      retries: 3
-    # Désérialisation, conversion JSON, ack et retries : voir KafkaListenerConfig
+    # Producteur : voir KafkaConfig ; consommateurs (conversion JSON, ack, retries) : voir KafkaListenerConfig
     consumer:
       group-id: ticket-service-group
   cloud:
@@ -49,9 +43,9 @@ eureka:
 
 ticket:
   # Clé partagée exigée sur /internal/** (appels service-à-service, ex: notification-service)
-  # Doit être IDENTIQUE à notification.internal.api-key côté notification-service
+  # Doit être IDENTIQUE dans auth-service, notification-service et ticket-service
   internal:
-    api-key: ${INTERNAL_API_KEY:change-me-in-production}
+    api-key: ${INTERNAL_API_KEY}
   # Durées du cycle de vie d'une réservation
   reservation:
     # Temps laissé pour lancer le paiement une fois les places confirmées par event-service

@@ -1,10 +1,78 @@
 spring:
   application:
     name: ticket-service-ticket241
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ticket_service_db
+    username: postgres
+    password: azerty
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+      acks: all
+      retries: 3
+    # Désérialisation, conversion JSON, ack et retries : voir KafkaListenerConfig
+    consumer:
+      group-id: ticket-service-group
+  cloud:
+    openfeign:
+      # Depuis Spring Cloud 2022 les clés "feign.*" ne sont plus lues : c'est ici que se règlent les
+      # timeouts des appels à event-service. Les erreurs Feign sont traduites en 404/503 par
+      # GlobalExceptionHandler (pas de circuit breaker Feign : son timeout par défaut d'1 s
+      # faisait échouer des appels sains).
+      client:
+        config:
+          default:
+            connectTimeout: 5000
+            readTimeout: 5000
+            loggerLevel: basic
+
 server:
   port: 9002
+
 eureka:
   client:
     service-url:
-      defaultZone:
-        http://localhost:8781/eureka/
+      defaultZone: http://localhost:8781/eureka/
+
+ticket:
+  # Clé partagée exigée sur /internal/** (appels service-à-service, ex: notification-service)
+  # Doit être IDENTIQUE à notification.internal.api-key côté notification-service
+  internal:
+    api-key: ${INTERNAL_API_KEY:change-me-in-production}
+  # Durées du cycle de vie d'une réservation
+  reservation:
+    # Temps laissé pour lancer le paiement une fois les places confirmées par event-service
+    hold-minutes: 10
+    # Billet resté PENDING (event-service n'a jamais répondu) : expiré après ce délai
+    pending-timeout-minutes: 5
+    # Temps laissé au paiement mobile money une fois lancé (le billet n'expire pas pendant ce délai)
+    payment-window-minutes: 15
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.tchelo: DEBUG
+    org.springframework.web: INFO
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: DEBUG

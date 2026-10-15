@@ -1,0 +1,3 @@
+# Infrastructure gérée en local (PostgreSQL déjà installé sur le poste)
+# Kafka est géré par eureka_server_ticket241
+# Ce fichier est conservé vide intentionnellement

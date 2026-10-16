@@ -3,6 +3,7 @@ package com.tchelo.ticket_service_ticket241.controller;
 import com.tchelo.ticket_service_ticket241.dto.request.*;
 import com.tchelo.ticket_service_ticket241.dto.response.*;
 import com.tchelo.ticket_service_ticket241.security.UserContext;
+import com.tchelo.ticket_service_ticket241.service.GuestTicketService;
 import com.tchelo.ticket_service_ticket241.service.TicketService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ import java.util.List;
 public class TicketController {
 
     private final TicketService ticketService;
+    private final GuestTicketService guestTicketService;
 
 
     // ENDPOINTS PUBLICS / UTILISATEUR AUTHENTIFIÉ
@@ -144,6 +146,19 @@ public class TicketController {
         List<TicketResponseDto> response = ticketService.getTicketsByOrder(orderId, userId, roles);
 
         return ResponseEntity.ok(response);
+    }
+
+    // Rattacher à son compte une commande passée sans compte : il faut le jeton de la commande
+    // (le lien reçu à l'achat), pas seulement le même numéro, qui n'est pas vérifié à l'inscription
+    @PostMapping("/order/{orderId}/claim-guest")
+    public ResponseEntity<List<TicketResponseDto>> claimGuestOrder(
+            @PathVariable String orderId,
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader(value = "X-Guest-Token", required = false) String accessToken
+    ) {
+        log.info("Rattachement de la commande invité {} au compte {}", orderId, userId);
+
+        return ResponseEntity.ok(guestTicketService.claimOrder(orderId, accessToken, userId));
     }
 
     // Annuler un ticket

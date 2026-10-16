@@ -149,6 +149,16 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.FORBIDDEN, ex.getMessage(), request);
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<Map<String, Object>> handleTooManyRequests(
+            TooManyRequestsException ex,
+            HttpServletRequest request
+    ) {
+        log.warn("Trop de requêtes sur {} : {}", request.getRequestURI(), ex.getMessage());
+
+        return buildResponse(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage(), request);
+    }
+
     // event-service a répondu 404 : événement ou catégorie inexistant (ou catégorie d'un autre événement)
     @ExceptionHandler(FeignException.NotFound.class)
     public ResponseEntity<Map<String, Object>> handleEventNotFound(

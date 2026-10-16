@@ -112,6 +112,16 @@ public class Ticket extends BaseEntity {
     @Column(name = "user_last_name", length = 100)
     private String userLastName;
 
+    // ACHAT INVITÉ (sans compte) : userId vaut alors "guest:<téléphone>", jamais le téléphone seul,
+    // pour qu'un compte créé avec ce numéro (non vérifié par SMS) ne voie pas ces billets automatiquement.
+    // L'accès passe par le lien de la commande (jeton dont seul le hash SHA-256 est stocké) ou par OTP.
+    @Column(name = "is_guest_order")
+    @Builder.Default
+    private Boolean guestOrder = false;
+
+    @Column(name = "guest_access_token_hash", length = 64)
+    private String guestAccessTokenHash;
+
 
     // BÉNÉFICIAIRE DU TICKET (si différent de l'acheteur)
 

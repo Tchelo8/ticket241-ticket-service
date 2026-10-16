@@ -48,6 +48,14 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
             List<TicketStatus> statuses
     );
 
+    // Commandes non encore payées d'un acheteur (limite les réservations invités qui bloquent des places)
+    @Query("SELECT COUNT(DISTINCT t.orderId) FROM Ticket t WHERE t.userId = :userId " +
+            "AND t.status IN :statuses AND t.isArchived = false")
+    long countOrdersByUserIdAndStatusIn(
+            @Param("userId") String userId,
+            @Param("statuses") List<TicketStatus> statuses
+    );
+
     @Query("SELECT t FROM Ticket t WHERE t.userId = :userId " +
             "AND t.status = 'PAID' " +
             "AND t.eventStartDate >= :now " +

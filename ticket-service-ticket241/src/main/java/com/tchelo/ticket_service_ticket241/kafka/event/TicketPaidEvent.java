@@ -20,6 +20,9 @@ public class TicketPaidEvent {
     private Long eventId;
     private Long categoryId;
     private Integer quantity;
+    // Détail par catégorie (une commande peut en mélanger plusieurs). ticketCategoryId / quantity
+    // ci-dessus ne sont renseignés que pour une commande d'une seule catégorie (anciens messages).
+    private List<CategoryQuantity> lines;
     private List<Long> ticketIds;
     private LocalDateTime paidAt;
     private LocalDateTime timestamp;

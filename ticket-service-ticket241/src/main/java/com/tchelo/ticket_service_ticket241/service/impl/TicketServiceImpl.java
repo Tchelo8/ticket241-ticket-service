@@ -9,6 +9,7 @@ import com.tchelo.ticket_service_ticket241.entity.Ticket;
 import com.tchelo.ticket_service_ticket241.entity.enums.PaymentStatus;
 import com.tchelo.ticket_service_ticket241.entity.enums.TicketStatus;
 import com.tchelo.ticket_service_ticket241.exception.*;
+import com.tchelo.ticket_service_ticket241.kafka.event.CategoryQuantity;
 import com.tchelo.ticket_service_ticket241.kafka.event.TicketReservedEvent;
 import com.tchelo.ticket_service_ticket241.kafka.producer.KafkaProducerService;
 import com.tchelo.ticket_service_ticket241.kafka.producer.TicketEvents;
@@ -30,6 +31,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -66,8 +68,14 @@ public class TicketServiceImpl implements TicketService {
     @Override
     public ReservationResponseDto reserveTickets(ReserveTicketsDto dto, String userId) {
 
-        log.info("Réservation de {} tickets pour l'événement {} par {}",
-                dto.getQuantity(), dto.getEventId(), userId);
+        List<ReservationItemDto> items = dto.resolvedItems();
+        if (items.isEmpty()) {
+            throw new InvalidTicketOperationException("Choisissez au moins une catégorie de billet");
+        }
+        int totalQuantity = ReservationItems.total(items);
+
+        log.info("Réservation de {} tickets ({} catégorie(s)) pour l'événement {} par {}",
+                totalQuantity, items.size(), dto.getEventId(), userId);
 
         EventDetailsDto eventDetails = eventServiceClient.getEventById(dto.getEventId());
 
@@ -75,99 +83,101 @@ public class TicketServiceImpl implements TicketService {
             throw new InvalidTicketOperationException(eventDetails.getSaleClosedReason());
         }
 
-        // 404 si la catégorie n'appartient pas à cet événement
-        TicketCategoryDetailsDto category = eventServiceClient.getTicketCategory(
-                dto.getEventId(),
-                dto.getTicketCategoryId()
-        );
-
-        if (!Boolean.TRUE.equals(category.getIsActive())) {
-            throw new InvalidTicketOperationException(
-                    "La catégorie de billet " + category.getName() + " n'est plus en vente"
-            );
-        }
-
-        if (category.getMaxTicketsPerOrder() != null && dto.getQuantity() > category.getMaxTicketsPerOrder()) {
-            throw new InvalidTicketOperationException(String.format(
-                    "Maximum %d billet(s) par commande dans la catégorie %s",
-                    category.getMaxTicketsPerOrder(), category.getName()));
-        }
-
+        // Limite par personne : sur le total de la commande, toutes catégories confondues
         if (eventDetails.getMaxTicketsPerUser() != null) {
             long alreadyOwned = ticketRepository.countByUserIdAndEventIdAndStatusInAndIsArchivedFalse(
                     userId, dto.getEventId(), LIVE_STATUSES);
-            if (alreadyOwned + dto.getQuantity() > eventDetails.getMaxTicketsPerUser()) {
+            if (alreadyOwned + totalQuantity > eventDetails.getMaxTicketsPerUser()) {
                 throw new InvalidTicketOperationException(String.format(
                         "Limite de %d billet(s) par personne pour cet événement (vous en avez déjà %d)",
                         eventDetails.getMaxTicketsPerUser(), alreadyOwned));
             }
         }
 
-        if (category.getAvailableSeats() == null || category.getAvailableSeats() < dto.getQuantity()) {
-            throw new InsufficientSeatsException(
-                    String.format("Plus assez de places disponibles. Catégorie: %s",
-                            category.getName())
-            );
+        // Toutes les catégories sont vérifiées AVANT de créer le moindre billet
+        Map<Long, TicketCategoryDetailsDto> categories = new LinkedHashMap<>();
+        for (ReservationItemDto item : items) {
+            // 404 si la catégorie n'appartient pas à cet événement
+            TicketCategoryDetailsDto category = eventServiceClient.getTicketCategory(
+                    dto.getEventId(), item.getTicketCategoryId());
+            checkCategoryCanBeReserved(category, item.getQuantity());
+            categories.put(item.getTicketCategoryId(), category);
         }
 
-        // Générer un Order ID unique pour grouper les tickets
+        // Une seule commande pour tout le panier : un seul paiement
         String orderId = UUID.randomUUID().toString();
 
         // Créer les tickets avec statut PENDING
         List<Ticket> tickets = new ArrayList<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
 
-        for (int i = 0; i < dto.getQuantity(); i++) {
+        for (ReservationItemDto item : items) {
+            TicketCategoryDetailsDto category = categories.get(item.getTicketCategoryId());
 
-            Ticket ticket = ticketMapper.createTicketFromReservation(
-                    dto,
-                    eventDetails.getId(),
-                    eventDetails.getUuid(),
-                    eventDetails.getName(),
-                    eventDetails.getSlug(),
-                    eventDetails.getStartDate(),
-                    eventDetails.getEndDate(),
-                    eventDetails.getVenueName(),
-                    eventDetails.getCityName(),
-                    category.getId(),
-                    category.getName(),
-                    category.getColorCode(),
-                    category.getPrice(),
-                    userId
-            );
+            for (int i = 0; i < item.getQuantity(); i++) {
 
-            ticket.setOrderId(orderId);
-            ticket.setEventStructureId(eventDetails.getStructureId());
-            ticket.setOrderTicketCount(dto.getQuantity());
-            ticket.setIsPrimaryTicket(i == 0);
+                Ticket ticket = ticketMapper.createTicketFromReservation(
+                        dto,
+                        eventDetails.getId(),
+                        eventDetails.getUuid(),
+                        eventDetails.getName(),
+                        eventDetails.getSlug(),
+                        eventDetails.getStartDate(),
+                        eventDetails.getEndDate(),
+                        eventDetails.getVenueName(),
+                        eventDetails.getCityName(),
+                        category.getId(),
+                        category.getName(),
+                        category.getColorCode(),
+                        category.getPrice(),
+                        userId
+                );
 
-            // UUID et numéro générés ici car le QR code en dépend (@PrePersist passerait trop tard)
-            String ticketUuid = UUID.randomUUID().toString();
-            String ticketNumber = Ticket.newTicketNumber();
-            ticket.setUuid(ticketUuid);
-            ticket.setTicketNumber(ticketNumber);
+                ticket.setOrderId(orderId);
+                ticket.setEventStructureId(eventDetails.getStructureId());
+                ticket.setOrderTicketCount(totalQuantity);
+                ticket.setIsPrimaryTicket(tickets.isEmpty());
 
-            // qrCode = contenu brut scanné à l'entrée, qrCodeImageUrl = image pour l'affichage
-            assignNewQrCode(ticket);
+                // UUID et numéro générés ici car le QR code en dépend (@PrePersist passerait trop tard)
+                String ticketUuid = UUID.randomUUID().toString();
+                String ticketNumber = Ticket.newTicketNumber();
+                ticket.setUuid(ticketUuid);
+                ticket.setTicketNumber(ticketNumber);
 
-            ticket.setStatus(TicketStatus.PENDING);
-            ticket.setCreatedBy(userId);
+                // qrCode = contenu brut scanné à l'entrée, qrCodeImageUrl = image pour l'affichage
+                assignNewQrCode(ticket);
 
-            tickets.add(ticket);
-            totalAmount = totalAmount.add(ticket.getFinalPrice());
+                ticket.setStatus(TicketStatus.PENDING);
+                ticket.setCreatedBy(userId);
+
+                tickets.add(ticket);
+                totalAmount = totalAmount.add(ticket.getFinalPrice());
+            }
+        }
+
+        for (Ticket ticket : tickets) {
+            ticket.setOrderTotalAmount(totalAmount);
         }
 
         // Sauvegarder les tickets
         List<Ticket> savedTickets = ticketRepository.saveAll(tickets);
         log.info("{} tickets créés avec statut PENDING", savedTickets.size());
 
-        // Envoyé après le commit : event-service ne peut pas répondre avant que les billets existent
+        // Envoyé après le commit : event-service ne peut pas répondre avant que les billets existent.
+        // event-service réserve les places de TOUTES les lignes, ou d'aucune.
+        boolean singleCategory = items.size() == 1;
         TicketReservedEvent reservedEvent = TicketReservedEvent.builder()
                 .eventId(eventDetails.getUuid())
                 .eventIdLong(eventDetails.getId())
                 .eventUuid(eventDetails.getUuid())
-                .ticketCategoryId(dto.getTicketCategoryId())
-                .quantity(dto.getQuantity())
+                .ticketCategoryId(singleCategory ? items.get(0).getTicketCategoryId() : null)
+                .quantity(singleCategory ? totalQuantity : null)
+                .lines(items.stream()
+                        .map(item -> CategoryQuantity.builder()
+                                .ticketCategoryId(item.getTicketCategoryId())
+                                .quantity(item.getQuantity())
+                                .build())
+                        .toList())
                 .ticketIds(savedTickets.stream().map(Ticket::getId).collect(Collectors.toList()))
                 .orderId(orderId)
                 .userId(userId)
@@ -193,6 +203,28 @@ public class TicketServiceImpl implements TicketService {
                 .message("Réservation en cours de traitement. Les places seront confirmées sous peu : "
                         + "suivez la commande via /api/tickets/order/" + orderId)
                 .build();
+    }
+
+    // Vérifications d'une ligne : catégorie en vente, maximum par commande, places annoncées
+    private void checkCategoryCanBeReserved(TicketCategoryDetailsDto category, int quantity) {
+        if (!Boolean.TRUE.equals(category.getIsActive())) {
+            throw new InvalidTicketOperationException(
+                    "La catégorie de billet " + category.getName() + " n'est plus en vente"
+            );
+        }
+
+        if (category.getMaxTicketsPerOrder() != null && quantity > category.getMaxTicketsPerOrder()) {
+            throw new InvalidTicketOperationException(String.format(
+                    "Maximum %d billet(s) par commande dans la catégorie %s",
+                    category.getMaxTicketsPerOrder(), category.getName()));
+        }
+
+        if (category.getAvailableSeats() == null || category.getAvailableSeats() < quantity) {
+            throw new InsufficientSeatsException(
+                    String.format("Plus assez de places disponibles. Catégorie: %s",
+                            category.getName())
+            );
+        }
     }
 
     // ACHAT / CONFIRMATION DE TICKETS

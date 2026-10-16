@@ -207,6 +207,24 @@ class GuestTicketServiceImplTest {
     }
 
     @Test
+    void aGuestCartOfSeveralCategoriesIsCappedAtFiveTicketsInTotal() {
+        GuestReserveTicketsDto cart = GuestReserveTicketsDto.builder().eventId(1L).phone(PHONE)
+                .items(List.of(new ReservationItemDto(10L, 3), new ReservationItemDto(11L, 2)))
+                .build();
+        assertThat(cart.isTotalQuantityAllowed()).isTrue();
+
+        cart.setItems(List.of(new ReservationItemDto(10L, 3), new ReservationItemDto(11L, 3)));
+        assertThat(cart.isTotalQuantityAllowed()).isFalse();
+
+        // Le panier complet part dans UNE réservation
+        cart.setItems(List.of(new ReservationItemDto(10L, 3), new ReservationItemDto(11L, 2)));
+        service.reserve(cart, "10.0.0.2");
+        ArgumentCaptor<ReserveTicketsDto> reservation = ArgumentCaptor.forClass(ReserveTicketsDto.class);
+        verify(ticketService).reserveTickets(reservation.capture(), eq(GUEST_USER));
+        assertThat(reservation.getValue().resolvedItems()).hasSize(2);
+    }
+
+    @Test
     void phonesTypedDifferentlyGiveTheSameGuest() {
         assertThat(GuestTokens.normalizePhone("077 12-34.56")).isEqualTo("077123456");
         assertThat(GuestTokens.normalizePhone("0024177123456")).isEqualTo("+24177123456");

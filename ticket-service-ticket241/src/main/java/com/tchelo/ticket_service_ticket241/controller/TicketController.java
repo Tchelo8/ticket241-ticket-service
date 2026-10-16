@@ -41,7 +41,7 @@ public class TicketController {
             @RequestHeader(value = "X-User-Email", required = false) String accountEmail
     ) {
         log.info("Requête réservation tickets : {} tickets pour event {}",
-                dto.getQuantity(), dto.getEventId());
+                ReservationItems.total(dto.resolvedItems()), dto.getEventId());
 
         // Email du compte (injecté par la gateway depuis le JWT) si le front n'en fournit pas :
         // c'est l'adresse qui recevra l'email de confirmation avec les billets

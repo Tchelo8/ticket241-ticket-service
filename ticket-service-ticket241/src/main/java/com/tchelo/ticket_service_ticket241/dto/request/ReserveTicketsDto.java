@@ -1,10 +1,14 @@
 package com.tchelo.ticket_service_ticket241.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -15,13 +19,35 @@ public class ReserveTicketsDto {
     @NotNull(message = "Le numéro de l'événement est obligatoire")
     private Long eventId;
 
-    @NotNull(message = "Le numéro de la catégorie de ticket est obligatoire")
+    public static final int MAX_TICKETS_PER_ORDER = 10;
+
+    // Panier : une ligne par catégorie (ex. 2 Standard + 1 VIP), le tout dans UNE commande et payé en une fois
+    @Valid
+    @Size(max = 20, message = "Trop de lignes dans la commande")
+    private List<ReservationItemDto> items;
+
+    // Ancien format, une seule catégorie : utilisé seulement si items est vide
     private Long ticketCategoryId;
 
-    @NotNull(message = "La quantité est obligatoire")
     @Min(value = 1, message = "La quantité doit être d'au moins 1 ticket")
-    @Max(value = 10, message = "Vous ne pouvez pas réserver plus de 10 tickets à la fois")
     private Integer quantity;
+
+    // Lignes de la commande, catégories en double regroupées
+    public List<ReservationItemDto> resolvedItems() {
+        return ReservationItems.resolve(items, ticketCategoryId, quantity);
+    }
+
+    @JsonIgnore
+    @AssertTrue(message = "Choisissez au moins une catégorie de billet")
+    public boolean isItemsPresent() {
+        return !resolvedItems().isEmpty();
+    }
+
+    @JsonIgnore
+    @AssertTrue(message = "Vous ne pouvez pas réserver plus de 10 tickets à la fois")
+    public boolean isTotalQuantityAllowed() {
+        return ReservationItems.total(resolvedItems()) <= MAX_TICKETS_PER_ORDER;
+    }
 
     @Email(message = "Email invalide, vérifiez votre email et réesayez.")
     private String userEmail;

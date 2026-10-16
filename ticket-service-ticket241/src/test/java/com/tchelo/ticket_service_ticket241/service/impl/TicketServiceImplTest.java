@@ -16,7 +16,14 @@ import com.tchelo.ticket_service_ticket241.entity.enums.TicketStatus;
 import com.tchelo.ticket_service_ticket241.exception.InvalidTicketOperationException;
 import com.tchelo.ticket_service_ticket241.exception.TicketAccessDeniedException;
 import com.tchelo.ticket_service_ticket241.kafka.event.TicketCancelledEvent;
+import com.tchelo.ticket_service_ticket241.dto.request.ReservationItemDto;
+import com.tchelo.ticket_service_ticket241.dto.response.TicketResponseDto;
+import com.tchelo.ticket_service_ticket241.exception.InsufficientSeatsException;
+import com.tchelo.ticket_service_ticket241.kafka.event.CategoryQuantity;
+import com.tchelo.ticket_service_ticket241.kafka.event.TicketPaidEvent;
+import com.tchelo.ticket_service_ticket241.kafka.event.TicketReservedEvent;
 import com.tchelo.ticket_service_ticket241.kafka.producer.KafkaProducerService;
+import com.tchelo.ticket_service_ticket241.kafka.producer.TicketEvents;
 import com.tchelo.ticket_service_ticket241.mapper.TicketMapper;
 import com.tchelo.ticket_service_ticket241.repository.TicketRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +43,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -256,6 +264,86 @@ class TicketServiceImplTest {
 
         assertThat(pdf.getFileName()).isEqualTo("billets-ticket241-order-1.pdf");
         assertThat(pdf.getContent()).isNotEmpty();
+    }
+
+    // ===== Panier de plusieurs catégories =====
+
+    private TicketCategoryDetailsDto vipCategory() {
+        TicketCategoryDetailsDto vip = TicketCategoryDetailsDto.builder()
+                .id(11L).name("Carré Or").price(new BigDecimal("25000"))
+                .availableSeats(5).isActive(true).maxTicketsPerOrder(10)
+                .build();
+        when(eventServiceClient.getTicketCategory(EVENT_ID, 11L)).thenReturn(vip);
+        return vip;
+    }
+
+    private ReserveTicketsDto mixedCart(int standard, int vip) {
+        return ReserveTicketsDto.builder().eventId(EVENT_ID)
+                .items(List.of(new ReservationItemDto(CATEGORY_ID, standard), new ReservationItemDto(11L, vip)))
+                .build();
+    }
+
+    @Test
+    void aMixedCartBecomesOneOrderAndOneMessageWithItsLines() {
+        vipCategory();
+
+        ReservationResponseDto response = service.reserveTickets(mixedCart(2, 1), USER);
+
+        assertThat(response.getTickets()).hasSize(3);
+        assertThat(response.getTickets()).extracting(TicketResponseDto::getOrderId).containsOnly(response.getOrderId());
+        assertThat(response.getTickets()).extracting(TicketResponseDto::getTicketCategoryName)
+                .containsExactly("VIP", "VIP", "Carré Or");
+
+        ArgumentCaptor<TicketReservedEvent> sent = ArgumentCaptor.forClass(TicketReservedEvent.class);
+        verify(kafkaProducerService).publishTicketReservedEvent(sent.capture());
+        assertThat(sent.getValue().getTicketCategoryId()).isNull();
+        assertThat(sent.getValue().getLines()).extracting(CategoryQuantity::getTicketCategoryId, CategoryQuantity::getQuantity)
+                .containsExactly(tuple(CATEGORY_ID, 2), tuple(11L, 1));
+    }
+
+    @Test
+    void oneUnavailableCategoryRefusesTheWholeCart() {
+        vipCategory().setAvailableSeats(0);
+
+        assertThatThrownBy(() -> service.reserveTickets(mixedCart(2, 1), USER))
+                .isInstanceOf(InsufficientSeatsException.class)
+                .hasMessageContaining("Carré Or");
+        verify(ticketRepository, never()).saveAll(anyList());
+        verify(kafkaProducerService, never()).publishTicketReservedEvent(any());
+    }
+
+    @Test
+    void thePersonalLimitCountsTheWholeCart() {
+        vipCategory();
+
+        assertThatThrownBy(() -> service.reserveTickets(mixedCart(3, 2), USER))
+                .isInstanceOf(InvalidTicketOperationException.class)
+                .hasMessageContaining("Limite de 4 billet(s)");
+    }
+
+    @Test
+    void theSameCategoryTwiceIsMergedAndTheTotalIsCapped() {
+        ReserveTicketsDto twice = ReserveTicketsDto.builder().eventId(EVENT_ID)
+                .items(List.of(new ReservationItemDto(CATEGORY_ID, 1), new ReservationItemDto(CATEGORY_ID, 2)))
+                .build();
+        assertThat(twice.resolvedItems()).extracting(ReservationItemDto::getQuantity).containsExactly(3);
+
+        assertThat(mixedCart(6, 5).isTotalQuantityAllowed()).isFalse();
+        assertThat(mixedCart(6, 4).isTotalQuantityAllowed()).isTrue();
+    }
+
+    @Test
+    void paymentOfAMixedOrderListsThePaidSeatsPerCategory() {
+        Ticket standard = ticket(TicketStatus.PAID);
+        Ticket vip = ticket(TicketStatus.PAID);
+        vip.setTicketCategoryId(11L);
+
+        TicketPaidEvent paid = TicketEvents.ticketsPaid(List.of(standard, standard, vip), "PAY-1");
+
+        assertThat(paid.getCategoryId()).isNull();
+        assertThat(paid.getQuantity()).isEqualTo(3);
+        assertThat(paid.getLines()).extracting(CategoryQuantity::getTicketCategoryId, CategoryQuantity::getQuantity)
+                .containsExactly(tuple(CATEGORY_ID, 2), tuple(11L, 1));
     }
 
     @Test

@@ -76,8 +76,7 @@ public class GuestTicketServiceImpl implements GuestTicketService {
         // Même réservation qu'avec un compte (vente ouverte, places, limite par personne : ici par numéro)
         ReserveTicketsDto reservation = ReserveTicketsDto.builder()
                 .eventId(dto.getEventId())
-                .ticketCategoryId(dto.getTicketCategoryId())
-                .quantity(dto.getQuantity())
+                .items(dto.resolvedItems())
                 .userPhone(phone)
                 .userEmail(dto.getEmail())
                 .userFirstName(dto.getFirstName())
@@ -93,7 +92,7 @@ public class GuestTicketServiceImpl implements GuestTicketService {
             ticket.setGuestOrder(true);
             ticket.setGuestAccessTokenHash(tokenHash);
         }
-        log.info("Commande invité {} créée ({} billet(s))", response.getOrderId(), dto.getQuantity());
+        log.info("Commande invité {} créée ({} billet(s))", response.getOrderId(), response.getTicketCount());
 
         return GuestReservationResponseDto.builder()
                 .orderId(response.getOrderId())

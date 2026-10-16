@@ -20,6 +20,9 @@ public class TicketReservedEvent {
     private String eventUuid;
     private Long ticketCategoryId;
     private Integer quantity;
+    // Détail par catégorie (une commande peut en mélanger plusieurs). ticketCategoryId / quantity
+    // ci-dessus ne sont renseignés que pour une commande d'une seule catégorie (anciens messages).
+    private List<CategoryQuantity> lines;
     private List<Long> ticketIds;
     private String orderId;
     private String userId;

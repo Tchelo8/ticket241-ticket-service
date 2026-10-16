@@ -2,6 +2,7 @@ package com.tchelo.ticket_service_ticket241.kafka.producer;
 
 import com.tchelo.ticket_service_ticket241.entity.Ticket;
 import com.tchelo.ticket_service_ticket241.entity.enums.TicketStatus;
+import com.tchelo.ticket_service_ticket241.kafka.event.CategoryQuantity;
 import com.tchelo.ticket_service_ticket241.kafka.event.ReservationExpiredEvent;
 import com.tchelo.ticket_service_ticket241.kafka.event.TicketCancelledEvent;
 import com.tchelo.ticket_service_ticket241.kafka.event.TicketConfirmedEvent;
@@ -9,9 +10,12 @@ import com.tchelo.ticket_service_ticket241.kafka.event.TicketPaidEvent;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 // Construction des messages Kafka à partir des billets, partagée par le service, le consommateur
 // et le job planifié pour que les champs attendus par event-service soient toujours remplis pareil
@@ -96,15 +100,24 @@ public final class TicketEvents {
         return owner.isEmpty() ? null : owner;
     }
 
-    // Tous les billets d'une commande sont d'une même catégorie (une réservation = une catégorie)
+    // Une commande peut mélanger plusieurs catégories : event-service vend les places ligne par ligne.
+    // categoryId n'est renseigné que pour une commande d'une seule catégorie (ancien format).
     public static TicketPaidEvent ticketsPaid(List<Ticket> paidTickets, String paymentId) {
         Ticket first = paidTickets.get(0);
+        Map<Long, Long> perCategory = paidTickets.stream()
+                .collect(Collectors.groupingBy(Ticket::getTicketCategoryId, LinkedHashMap::new, Collectors.counting()));
         return TicketPaidEvent.builder()
                 .orderId(first.getOrderId())
                 .paymentId(paymentId)
                 .eventId(first.getEventId())
-                .categoryId(first.getTicketCategoryId())
+                .categoryId(perCategory.size() == 1 ? first.getTicketCategoryId() : null)
                 .quantity(paidTickets.size())
+                .lines(perCategory.entrySet().stream()
+                        .map(entry -> CategoryQuantity.builder()
+                                .ticketCategoryId(entry.getKey())
+                                .quantity(entry.getValue().intValue())
+                                .build())
+                        .toList())
                 .ticketIds(paidTickets.stream().map(Ticket::getId).toList())
                 .paidAt(LocalDateTime.now())
                 .timestamp(LocalDateTime.now())

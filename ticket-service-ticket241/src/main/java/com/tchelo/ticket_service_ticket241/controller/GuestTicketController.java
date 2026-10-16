@@ -4,6 +4,7 @@ import com.tchelo.ticket_service_ticket241.dto.request.GuestAccessRequestDto;
 import com.tchelo.ticket_service_ticket241.dto.request.GuestAccessVerifyDto;
 import com.tchelo.ticket_service_ticket241.dto.request.GuestPurchaseDto;
 import com.tchelo.ticket_service_ticket241.dto.request.GuestReserveTicketsDto;
+import com.tchelo.ticket_service_ticket241.dto.request.ReservationItems;
 import com.tchelo.ticket_service_ticket241.dto.response.*;
 import com.tchelo.ticket_service_ticket241.service.GuestTicketService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -40,7 +41,8 @@ public class GuestTicketController {
             @Valid @RequestBody GuestReserveTicketsDto dto,
             HttpServletRequest request
     ) {
-        log.info("Réservation invité : {} billet(s) pour l'événement {}", dto.getQuantity(), dto.getEventId());
+        log.info("Réservation invité : {} billet(s) pour l'événement {}",
+                ReservationItems.total(dto.resolvedItems()), dto.getEventId());
         return ResponseEntity.status(HttpStatus.CREATED).body(guestTicketService.reserve(dto, clientIp(request)));
     }
 

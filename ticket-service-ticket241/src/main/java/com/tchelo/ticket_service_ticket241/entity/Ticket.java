@@ -75,6 +75,11 @@ public class Ticket extends BaseEntity {
     @Column(name = "event_venue_city_name", length = 100)
     private String eventVenueCityName;
 
+    // Structure organisatrice de l'événement (dénormalisée comme le reste) : seuls ses agents et ses
+    // admins peuvent scanner ce billet. Null sur les billets créés avant son ajout → relu auprès d'event-service.
+    @Column(name = "event_structure_id")
+    private Long eventStructureId;
+
 
     // CATÉGORIE DE TICKET DU SHOW
 

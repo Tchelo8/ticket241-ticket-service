@@ -14,6 +14,7 @@ import com.tchelo.ticket_service_ticket241.kafka.producer.KafkaProducerService;
 import com.tchelo.ticket_service_ticket241.kafka.producer.TicketEvents;
 import com.tchelo.ticket_service_ticket241.mapper.TicketMapper;
 import com.tchelo.ticket_service_ticket241.repository.TicketRepository;
+import com.tchelo.ticket_service_ticket241.security.UserContext;
 import com.tchelo.ticket_service_ticket241.service.QRCodeService;
 import com.tchelo.ticket_service_ticket241.service.TicketPdfService;
 import com.tchelo.ticket_service_ticket241.service.TicketService;
@@ -136,6 +137,7 @@ public class TicketServiceImpl implements TicketService {
             );
 
             ticket.setOrderId(orderId);
+            ticket.setEventStructureId(eventDetails.getStructureId());
             ticket.setOrderTicketCount(dto.getQuantity());
             ticket.setIsPrimaryTicket(i == 0);
 
@@ -392,7 +394,9 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<TicketSummaryDto> getTicketsByEvent(Long eventId, Pageable pageable) {
+    public Page<TicketSummaryDto> getTicketsByEvent(Long eventId, Pageable pageable, UserContext user) {
+        requireEventManagement(eventServiceClient.getEventById(eventId), user);
+
         return ticketRepository.findByEventIdAndIsArchivedFalseOrderByCreatedAtDesc(eventId, pageable)
                 .map(ticketMapper::toSummaryDto);
     }
@@ -411,9 +415,14 @@ public class TicketServiceImpl implements TicketService {
 
     // VALIDATION DE TICKET
     @Override
-    public ValidationResponseDto validateTicket(ValidateTicketDto dto) {
+    public ValidationResponseDto validateTicket(ValidateTicketDto dto, UserContext user) {
 
-        log.info("Validation du ticket avec QR Code");
+        log.info("Validation du ticket avec QR Code par {}", user.userId());
+
+        // Refus avant toute recherche : le scanner ne doit pas servir à sonder des billets
+        if (!user.canScanTickets()) {
+            throw new TicketAccessDeniedException("Seuls les contrôleurs d'entrée et les organisateurs peuvent scanner des billets");
+        }
 
         if (!qrCodeService.validateQRCode(dto.getQrCode())) {
             return ValidationResponseDto.builder()
@@ -432,6 +441,16 @@ public class TicketServiceImpl implements TicketService {
                     .isValid(false)
                     .validationResult("NOT_FOUND")
                     .message("Ticket introuvable ou QR code périmé")
+                    .build();
+        }
+
+        // Un agent ne scanne que les billets des événements de SA structure (sinon un agent de la
+        // structure A pourrait faire entrer des billets d'un concert de la structure B)
+        if (!user.canScanForStructure(resolveStructureId(ticket))) {
+            return ValidationResponseDto.builder()
+                    .isValid(false)
+                    .validationResult("WRONG_ORGANIZER")
+                    .message("Ce billet concerne un événement d'un autre organisateur")
                     .build();
         }
 
@@ -673,11 +692,12 @@ public class TicketServiceImpl implements TicketService {
     // STATISTIQUES
     @Override
     @Transactional(readOnly = true)
-    public TicketStatisticsDto getEventStatistics(Long eventId) {
+    public TicketStatisticsDto getEventStatistics(Long eventId, UserContext user) {
 
         log.info("Récupération des statistiques pour l'événement {}", eventId);
 
         EventDetailsDto eventDetails = eventServiceClient.getEventById(eventId);
+        requireEventManagement(eventDetails, user);
 
         List<Ticket> allTickets = ticketRepository.findByEventIdAndIsArchivedFalse(eventId);
 
@@ -754,7 +774,23 @@ public class TicketServiceImpl implements TicketService {
     }
 
     private boolean isAdmin(String roles) {
-        return roles != null && roles.contains("ROLE_ADMIN");
+        return UserContext.of(null, roles, null).isAdmin();
+    }
+
+    // Billets et statistiques d'un événement : admin Ticket241 ou admin de sa structure organisatrice
+    private void requireEventManagement(EventDetailsDto event, UserContext user) {
+        if (!user.canManageStructure(event.getStructureId())) {
+            throw new TicketAccessDeniedException("Seuls les organisateurs de cet événement peuvent consulter ses billets");
+        }
+    }
+
+    // Structure organisatrice du billet ; les billets créés avant l'ajout de la colonne sont complétés
+    // une fois auprès d'event-service (la valeur est enregistrée avec la validation du billet)
+    private Long resolveStructureId(Ticket ticket) {
+        if (ticket.getEventStructureId() == null) {
+            ticket.setEventStructureId(eventServiceClient.getEventById(ticket.getEventId()).getStructureId());
+        }
+        return ticket.getEventStructureId();
     }
 
     // Nouveau jeton + contenu + image du QR code (création du billet et transfert)

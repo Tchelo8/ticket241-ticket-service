@@ -26,6 +26,8 @@ public class EventDetailsDto {
     private Integer totalSeats;
     private Integer availableSeats;
     private Integer maxTicketsPerUser;
+    // Structure organisatrice : détermine quels agents et admins de structure gèrent ses billets
+    private Long structureId;
     // null si la vente est ouverte, sinon la raison donnée par event-service (brouillon, annulé, passé…)
     private String saleClosedReason;
     private List<TicketCategoryDetailsDto> ticketCategories;

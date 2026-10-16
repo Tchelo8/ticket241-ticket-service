@@ -2,6 +2,7 @@ package com.tchelo.ticket_service_ticket241.controller;
 
 import com.tchelo.ticket_service_ticket241.dto.request.*;
 import com.tchelo.ticket_service_ticket241.dto.response.*;
+import com.tchelo.ticket_service_ticket241.security.UserContext;
 import com.tchelo.ticket_service_ticket241.service.TicketService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -224,30 +225,27 @@ public class TicketController {
     public ResponseEntity<ValidationResponseDto> validateTicket(
             @Valid @RequestBody ValidateTicketDto dto,
             @RequestHeader("X-User-Id") String validatorId,
-            @RequestHeader("X-User-Roles") String roles
+            @RequestHeader("X-User-Roles") String roles,
+            @RequestHeader(value = "X-User-Structure-Id", required = false) String structureId
     ) {
         log.info("Requête validation ticket par {}", validatorId);
 
-        // Vérifier que l'utilisateur a le rôle AGENT ou ADMIN
-        if (!roles.contains("ROLE_AGENT") && !roles.contains("ROLE_ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+        // Le validateur est toujours la personne connectée, jamais une valeur envoyée par le client
+        dto.setValidatedBy(validatorId);
 
-        // Ajouter l'ID du validateur si non fourni
-        if (dto.getValidatedBy() == null || dto.getValidatedBy().isEmpty()) {
-            dto.setValidatedBy(validatorId);
-        }
-
-        ValidationResponseDto response = ticketService.validateTicket(dto);
+        // Droits (admin, ou agent / admin de la structure organisatrice) vérifiés dans le service
+        ValidationResponseDto response = ticketService.validateTicket(dto, UserContext.of(validatorId, roles, structureId));
 
         return ResponseEntity.ok(response);
     }
 
-    //Lister tous les tickets d'un événement (Admin uniquement)
+    //Lister tous les tickets d'un événement (admin, ou admin de la structure organisatrice)
     @GetMapping("/event/{eventId}")
     public ResponseEntity<Page<TicketSummaryDto>> getTicketsByEvent(
             @PathVariable Long eventId,
+            @RequestHeader("X-User-Id") String userId,
             @RequestHeader("X-User-Roles") String roles,
+            @RequestHeader(value = "X-User-Structure-Id", required = false) String structureId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
@@ -255,36 +253,29 @@ public class TicketController {
     ) {
         log.info("Requête liste tickets pour événement : {}", eventId);
 
-        // Vérifier que l'utilisateur a le rôle ADMIN
-        if (!roles.contains("ROLE_ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-
         Sort sort = sortDirection.equalsIgnoreCase("ASC")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
 
         Pageable pageable = PageRequest.of(page, size, sort);
 
-        Page<TicketSummaryDto> response = ticketService.getTicketsByEvent(eventId, pageable);
+        Page<TicketSummaryDto> response = ticketService.getTicketsByEvent(
+                eventId, pageable, UserContext.of(userId, roles, structureId));
 
         return ResponseEntity.ok(response);
     }
 
-    //Récupérer les statistiques d'un événement (Admin uniquement)
+    //Récupérer les statistiques d'un événement (admin, ou admin de la structure organisatrice)
     @GetMapping("/event/{eventId}/statistics")
     public ResponseEntity<TicketStatisticsDto> getEventStatistics(
             @PathVariable Long eventId,
-            @RequestHeader("X-User-Roles") String roles
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Roles") String roles,
+            @RequestHeader(value = "X-User-Structure-Id", required = false) String structureId
     ) {
         log.info("Requête statistiques pour événement : {}", eventId);
 
-        // Vérifier que l'utilisateur a le rôle ADMIN
-        if (!roles.contains("ROLE_ADMIN")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-
-        TicketStatisticsDto response = ticketService.getEventStatistics(eventId);
+        TicketStatisticsDto response = ticketService.getEventStatistics(eventId, UserContext.of(userId, roles, structureId));
 
         return ResponseEntity.ok(response);
     }

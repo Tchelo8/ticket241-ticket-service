@@ -2,6 +2,7 @@ package com.tchelo.ticket_service_ticket241.service;
 
 import com.tchelo.ticket_service_ticket241.dto.request.*;
 import com.tchelo.ticket_service_ticket241.dto.response.*;
+import com.tchelo.ticket_service_ticket241.security.UserContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -27,8 +28,8 @@ public interface TicketService {
     // Liste les tickets à venir d'un utilisateur
     Page<TicketSummaryDto> getMyUpcomingTickets(String userId, Pageable pageable);
 
-    // Liste tous les tickets d'un événement
-    Page<TicketSummaryDto> getTicketsByEvent(Long eventId, Pageable pageable);
+    // Liste tous les tickets d'un événement : admin Ticket241 ou admin de la structure organisatrice
+    Page<TicketSummaryDto> getTicketsByEvent(Long eventId, Pageable pageable, UserContext user);
 
     // Billets d'une commande : propriétaire ou administrateur uniquement
     List<TicketResponseDto> getTicketsByOrder(String orderId, String userId, String roles);
@@ -36,8 +37,9 @@ public interface TicketService {
     // Annule un ticket
     TicketResponseDto cancelTicket(String uuid, CancelTicketDto dto, String userId);
 
-    // Valide un ticket à l'entrée via QR Code
-    ValidationResponseDto validateTicket(ValidateTicketDto dto);
+    // Valide un ticket à l'entrée via QR Code : admin Ticket241, ou agent / admin de la structure
+    // organisatrice de l'événement du billet
+    ValidationResponseDto validateTicket(ValidateTicketDto dto, UserContext user);
 
     // Transfère un ticket à un autre utilisateur
     TicketResponseDto transferTicket(String uuid, TransferTicketDto dto, String userId);
@@ -55,6 +57,6 @@ public interface TicketService {
     // de notification-service, protégé par la clé interne)
     TicketPdfDto getOrderTicketsPdfForConfirmation(String orderId);
 
-    // Récupère les statistiques d'un événement
-    TicketStatisticsDto getEventStatistics(Long eventId);
+    // Récupère les statistiques d'un événement : admin Ticket241 ou admin de la structure organisatrice
+    TicketStatisticsDto getEventStatistics(Long eventId, UserContext user);
 }

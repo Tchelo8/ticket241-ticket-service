@@ -43,8 +43,11 @@ public class AccountStatusChecker {
         }
 
         try {
+            // Numéro passé en variable d'URI : il est alors entièrement encodé ("+241…" → "%2B241…").
+            // Mis tel quel dans la requête, le "+" était lu comme un espace par auth-service : compte
+            // introuvable, donc traité comme supprimé (403 ACCOUNT_NOT_ACTIVE à tort)
             AccountStatusResponse response = authServiceRestClient.get()
-                    .uri(uri -> uri.path("/internal/accounts/status").queryParam("phone", phone).build())
+                    .uri(uri -> uri.path("/internal/accounts/status").queryParam("phone", "{phone}").build(phone))
                     .retrieve()
                     .body(AccountStatusResponse.class);
             boolean active = response != null && response.active();
